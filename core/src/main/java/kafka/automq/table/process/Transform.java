@@ -23,6 +23,7 @@ import kafka.automq.table.process.exception.TransformException;
 
 import org.apache.avro.generic.GenericRecord;
 
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -54,6 +55,26 @@ public interface Transform {
      * @throws IllegalArgumentException if record or context is null
      */
     GenericRecord apply(GenericRecord record, TransformContext context) throws TransformException;
+
+    /**
+     * Applies transformation to one input record and returns every output row it produces.
+     *
+     * <p>The default implementation wraps {@link #apply(GenericRecord, TransformContext)} in a single-element
+     * list. Transforms that fan out one input into many rows override this method. An empty list means the
+     * input produced no rows, and the Kafka record still counts as processed.</p>
+     *
+     * @param record the input GenericRecord, must not be null
+     * @param context contextual information for the transformation
+     * @return the output rows, never null
+     * @throws TransformException if transformation fails
+     */
+    default List<GenericRecord> applyAll(GenericRecord record, TransformContext context) throws TransformException {
+        GenericRecord output = apply(record, context);
+        if (output == null) {
+            throw new TransformException("Transform " + getName() + " returned null record");
+        }
+        return List.of(output);
+    }
 
     /**
      * Returns a descriptive name for this transform.

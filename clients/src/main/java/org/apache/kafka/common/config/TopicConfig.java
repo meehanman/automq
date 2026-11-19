@@ -311,8 +311,9 @@ public class TopicConfig {
     public static final String AUTOMQ_TABLE_TOPIC_TRANSFORM_VALUE_TYPE_CONFIG = "automq.table.topic.transform.value.type";
     public static final String AUTOMQ_TABLE_TOPIC_TRANSFORM_VALUE_TYPE_DOC = "Transformation to apply to the record value after conversion. " +
         "Supported: 'none', 'flatten' (extract fields from structured records), " +
-        "'flatten_debezium' (process Debezium CDC events). " +
-        "Note: 'flatten_debezium' requires schema-based conversion.";
+        "'flatten_debezium' (process Debezium CDC events), " +
+        "'flatten_otlp' (expand OTLP logs or traces into one row per log record or span). " +
+        "Note: 'flatten_debezium' and 'flatten_otlp' require schema-based conversion.";
 
     public static final String TABLE_TOPIC_ID_COLUMNS_CONFIG = "automq.table.topic.id.columns";
     public static final String TABLE_TOPIC_ID_COLUMNS_DOC = "The primary key, comma-separated list of columns that identify a row in tables. "

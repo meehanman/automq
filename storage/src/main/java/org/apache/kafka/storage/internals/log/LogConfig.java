@@ -77,6 +77,7 @@ import static org.apache.kafka.server.record.TableTopicConvertType.BY_LATEST_SCH
 import static org.apache.kafka.server.record.TableTopicConvertType.BY_SCHEMA_ID;
 import static org.apache.kafka.server.record.TableTopicConvertType.RAW;
 import static org.apache.kafka.server.record.TableTopicTransformType.FLATTEN_DEBEZIUM;
+import static org.apache.kafka.server.record.TableTopicTransformType.FLATTEN_OTLP;
 import static org.apache.kafka.server.record.TableTopicTransformType.NONE;
 
 public class LogConfig extends AbstractConfig {
@@ -869,8 +870,9 @@ public class LogConfig extends AbstractConfig {
         if ((BY_SCHEMA_ID.name.equals(keyConvertProperty) || BY_LATEST_SCHEMA.name.equals(keyConvertProperty)) && (tableTopicSchemaRegistryUrl == null || tableTopicSchemaRegistryUrl.isEmpty())) {
             throw new InvalidConfigurationException("Table topic convert type is set to '" + keyConvertProperty + "' but schema registry URL is not configured");
         }
-        if (!(BY_SCHEMA_ID.name.equals(valueConvertProperty) || BY_LATEST_SCHEMA.name.equals(valueConvertProperty)) && FLATTEN_DEBEZIUM.name.equals(transformProperty)) {
-            throw new InvalidConfigurationException(valueConvertProperty + " convert type cannot be used with '" + FLATTEN_DEBEZIUM.name + "' transform type");
+        if (!(BY_SCHEMA_ID.name.equals(valueConvertProperty) || BY_LATEST_SCHEMA.name.equals(valueConvertProperty))
+            && (FLATTEN_DEBEZIUM.name.equals(transformProperty) || FLATTEN_OTLP.name.equals(transformProperty))) {
+            throw new InvalidConfigurationException(valueConvertProperty + " convert type cannot be used with '" + transformProperty + "' transform type");
         }
         if (idColumns.equals(List.of(FROM_DEBEZIUM_KEY)) && !BY_SCHEMA_ID.name.equals(keyConvertProperty)) {
             throw new InvalidConfigurationException(

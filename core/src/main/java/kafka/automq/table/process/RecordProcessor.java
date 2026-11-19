@@ -23,6 +23,7 @@ import kafka.automq.table.process.exception.RecordProcessorException;
 
 import org.apache.kafka.common.record.Record;
 
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -39,6 +40,20 @@ public interface RecordProcessor {
      * @return ProcessingResult containing the converted record or error information
      */
     ProcessingResult process(int partition, Record record);
+
+    /**
+     * Processes a Kafka record into zero or more rows, one per output row of the transform chain.
+     *
+     * <p>A failure is reported as a single failed result, so callers never see a partial set of rows.
+     * An empty list means the record produced no rows.</p>
+     *
+     * @param partition topic partition
+     * @param record    the Kafka record to process
+     * @return one result per output row, or a single failed result
+     */
+    default List<ProcessingResult> processRows(int partition, Record record) {
+        return List.of(process(partition, record));
+    }
 
 
     void configure(Map<String, ?> configs) throws RecordProcessorException;

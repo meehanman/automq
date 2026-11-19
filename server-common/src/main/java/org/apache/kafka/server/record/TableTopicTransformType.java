@@ -28,7 +28,8 @@ import static java.util.Arrays.asList;
 public enum TableTopicTransformType {
     NONE("none"),
     FLATTEN("flatten"),
-    FLATTEN_DEBEZIUM("flatten_debezium");
+    FLATTEN_DEBEZIUM("flatten_debezium"),
+    FLATTEN_OTLP("flatten_otlp");
 
     public final String name;
     private static final List<TableTopicTransformType> VALUES = asList(values());

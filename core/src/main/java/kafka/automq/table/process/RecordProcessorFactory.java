@@ -22,6 +22,7 @@ package kafka.automq.table.process;
 import kafka.automq.table.process.convert.ConverterFactory;
 import kafka.automq.table.process.convert.StringConverter;
 import kafka.automq.table.process.transform.DebeziumUnwrapTransform;
+import kafka.automq.table.process.transform.FlattenOtlpTransform;
 import kafka.automq.table.process.transform.FlattenTransform;
 import kafka.automq.table.process.transform.SchemalessTransform;
 import kafka.automq.table.worker.WorkerConfig;
@@ -77,6 +78,8 @@ public class RecordProcessorFactory {
                 return List.of(FlattenTransform.INSTANCE);
             case FLATTEN_DEBEZIUM:
                 return List.of(FlattenTransform.INSTANCE, DebeziumUnwrapTransform.INSTANCE);
+            case FLATTEN_OTLP:
+                return List.of(FlattenTransform.INSTANCE, FlattenOtlpTransform.INSTANCE);
             default:
                 throw new IllegalArgumentException("Unsupported transform type: " + transformType);
         }

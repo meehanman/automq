@@ -36,6 +36,7 @@ import org.apache.avro.generic.GenericRecord;
 import org.jetbrains.annotations.NotNull;
 
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -113,7 +114,7 @@ public class DefaultRecordProcessor implements RecordProcessor {
     }
 
     @Override
-    public ProcessingResult process(int partition, Record kafkaRecord) {
+    public List<ProcessingResult> processRows(int partition, Record kafkaRecord) {
         try {
             Objects.requireNonNull(kafkaRecord, "Kafka record cannot be null");
 
@@ -122,38 +123,54 @@ public class DefaultRecordProcessor implements RecordProcessor {
             ConversionResult valueResult = valueConverter.convert(topicName, kafkaRecord.value());
 
             GenericRecord baseRecord = wrapValue(valueResult);
-            GenericRecord transformedRecord = applyTransformChain(baseRecord, partition, kafkaRecord);
+            List<GenericRecord> transformedRecords = applyTransformChain(baseRecord, partition, kafkaRecord);
 
             List<String> identifierColumns = resolveIdentifierColumns(keyResult);
             String schemaIdentity = generateCompositeSchemaIdentity(headerResult, keyResult, valueResult, identifierColumns);
 
-            GenericRecord record = recordAssembler
-                .reset(transformedRecord)
-                .withHeader(headerResult)
-                .withKey(keyResult)
-                .withSchemaIdentity(schemaIdentity)
-                .withMetadata(partition, kafkaRecord.offset(), kafkaRecord.timestamp())
-                .assemble();
-            Schema schema = record.getSchema();
-
-            return new ProcessingResult(record, schema, schemaIdentity, identifierColumns);
+            List<ProcessingResult> results = new ArrayList<>(transformedRecords.size());
+            for (GenericRecord transformedRecord : transformedRecords) {
+                GenericRecord record = recordAssembler
+                    .reset(transformedRecord)
+                    .withHeader(headerResult)
+                    .withKey(keyResult)
+                    .withSchemaIdentity(schemaIdentity)
+                    .withMetadata(partition, kafkaRecord.offset(), kafkaRecord.timestamp())
+                    .assemble();
+                results.add(new ProcessingResult(record, record.getSchema(), schemaIdentity, identifierColumns));
+            }
+            return results;
         } catch (ConverterException e) {
-            return getProcessingResult(kafkaRecord, "Convert operation failed for record: %s", DataError.ErrorType.CONVERT_ERROR, e);
+            return List.of(getProcessingResult(kafkaRecord, "Convert operation failed for record: %s", DataError.ErrorType.CONVERT_ERROR, e));
         } catch (TransformException e) {
-            return getProcessingResult(kafkaRecord, "Transform operation failed for record: %s", DataError.ErrorType.TRANSFORMATION_ERROR, e);
+            return List.of(getProcessingResult(kafkaRecord, "Transform operation failed for record: %s", DataError.ErrorType.TRANSFORMATION_ERROR, e));
         } catch (InvalidDataException e) {
-            return getProcessingResult(kafkaRecord, "Transform operation failed for record: %s", DataError.ErrorType.DATA_ERROR, e);
+            return List.of(getProcessingResult(kafkaRecord, "Transform operation failed for record: %s", DataError.ErrorType.DATA_ERROR, e));
         } catch (Exception e) {
             if (e.getCause() instanceof RestClientException) {
                 RestClientException exception = (RestClientException) e.getCause();
                 // io.confluent.kafka.serializers.AbstractKafkaSchemaSerDe#toKafkaException
                 if (isSchemaOrSubjectNotFoundException(exception)) { // not found
-                    return getProcessingResult(kafkaRecord, "Schema or subject not found for record: %s", DataError.ErrorType.CONVERT_ERROR, exception);
+                    return List.of(getProcessingResult(kafkaRecord, "Schema or subject not found for record: %s", DataError.ErrorType.CONVERT_ERROR, exception));
                 }
                 throw SchemaRegistrySystemException.fromStatusCode(exception, buildRecordContext(kafkaRecord));
             }
-            return getProcessingResult(kafkaRecord, "Unexpected error processing record: %s", DataError.ErrorType.UNKNOW_ERROR, e);
+            return List.of(getProcessingResult(kafkaRecord, "Unexpected error processing record: %s", DataError.ErrorType.UNKNOW_ERROR, e));
         }
+    }
+
+    /**
+     * Processes a Kafka record that must produce exactly one row.
+     *
+     * @throws IllegalStateException if the transform chain produces zero or several rows; use {@link #processRows} instead
+     */
+    @Override
+    public ProcessingResult process(int partition, Record kafkaRecord) {
+        List<ProcessingResult> rows = processRows(partition, kafkaRecord);
+        if (rows.size() != 1) {
+            throw new IllegalStateException("Expected exactly one row but got " + rows.size() + "; use processRows");
+        }
+        return rows.get(0);
     }
 
     private List<String> resolveIdentifierColumns(ConversionResult keyResult) {
@@ -271,21 +288,31 @@ public class DefaultRecordProcessor implements RecordProcessor {
         return baseRecord;
     }
 
-    private GenericRecord applyTransformChain(GenericRecord baseRecord, int partition, Record kafkaRecord) throws TransformException {
+    private List<GenericRecord> applyTransformChain(GenericRecord baseRecord, int partition, Record kafkaRecord) throws TransformException {
         if (transformChain.isEmpty()) {
-            return baseRecord;
+            return List.of(baseRecord);
         }
 
-        GenericRecord currentRecord = baseRecord;
+        List<GenericRecord> currentRecords = List.of(baseRecord);
         TransformContext context = new TransformContext(kafkaRecord, topicName, partition);
 
         for (Transform transform : transformChain) {
-            currentRecord = transform.apply(currentRecord, context);
-            if (currentRecord == null) {
-                throw new TransformException("Transform " + transform.getName() + " returned null record");
+            List<GenericRecord> nextRecords = new ArrayList<>();
+            for (GenericRecord currentRecord : currentRecords) {
+                List<GenericRecord> outputs = transform.applyAll(currentRecord, context);
+                if (outputs == null) {
+                    throw new TransformException("Transform " + transform.getName() + " returned null records");
+                }
+                for (GenericRecord output : outputs) {
+                    if (output == null) {
+                        throw new TransformException("Transform " + transform.getName() + " returned null record");
+                    }
+                    nextRecords.add(output);
+                }
             }
+            currentRecords = nextRecords;
         }
-        return currentRecord;
+        return currentRecords;
     }
 
 

@@ -111,7 +111,6 @@ public class IcebergWriter implements Writer {
         }
         try {
             if (write0(partition, kafkaRecord)) {
-                recordCount++;
                 dirtyBytes += kafkaRecord.sizeInBytes();
             }
             offsetRangeMap.compute(partition, (k, v) -> {
@@ -139,23 +138,35 @@ public class IcebergWriter implements Writer {
 
     protected boolean write0(int partition,
                              org.apache.kafka.common.record.Record kafkaRecord) throws IOException, RecordProcessorException {
-        ProcessingResult result = processor.process(partition, kafkaRecord);
+        List<ProcessingResult> results = processor.processRows(partition, kafkaRecord);
 
-        if (!result.isSuccess()) {
-            DataError error = result.getError();
-            String recordContext = buildRecordContext(partition, kafkaRecord);
-            String errorMsg = String.format("Data processing failed for record: %s", recordContext);
+        // A failed row fails the whole Kafka record, so no row from it is written.
+        for (ProcessingResult result : results) {
+            if (!result.isSuccess()) {
+                DataError error = result.getError();
+                String recordContext = buildRecordContext(partition, kafkaRecord);
+                String errorMsg = String.format("Data processing failed for record: %s", recordContext);
 
-            if (config.errorsTolerance() == ErrorsTolerance.ALL
-                || (DataError.ErrorType.DATA_ERROR.equals(error.getType())
-                    && config.errorsTolerance().equals(ErrorsTolerance.INVALID_DATA))) {
-                INVALID_DATA_LOGGER.warn("[INVALID_DATA],{}", this, error.getCause());
-                return false;
-            } else {
-                throw new RecordProcessorException(errorMsg + " - " + error.getDetailedMessage(), error.getCause());
+                if (config.errorsTolerance() == ErrorsTolerance.ALL
+                    || (DataError.ErrorType.DATA_ERROR.equals(error.getType())
+                        && config.errorsTolerance().equals(ErrorsTolerance.INVALID_DATA))) {
+                    INVALID_DATA_LOGGER.warn("[INVALID_DATA],{}", this, error.getCause());
+                    return false;
+                } else {
+                    throw new RecordProcessorException(errorMsg + " - " + error.getDetailedMessage(), error.getCause());
+                }
             }
         }
 
+        for (ProcessingResult result : results) {
+            writeRow(partition, kafkaRecord, result);
+            recordCount++;
+        }
+        return !results.isEmpty();
+    }
+
+    protected void writeRow(int partition, org.apache.kafka.common.record.Record kafkaRecord,
+                          ProcessingResult result) throws IOException, RecordProcessorException {
         GenericRecord finalRecord = result.getFinalRecord();
         List<String> identifierColumns = result.getIdentifierColumns();
 
@@ -188,13 +199,11 @@ public class IcebergWriter implements Writer {
 
         TaskWriter<Record> writer = getWriter(record.struct());
 
-
         if (deltaWrite) {
             writer.write(new RecordWrapper(record, config.cdcField(), config.upsertEnable()));
         } else {
             writer.write(record);
         }
-        return true;
     }
 
     @Override
